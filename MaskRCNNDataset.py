@@ -1,7 +1,8 @@
 import os
 import torch
 
-from torchvision.io import read_image
+from torchvision.io import read_image, decode_image
+from PIL import Image
 from torchvision.ops.boxes import masks_to_boxes
 from torchvision import tv_tensors
 from torchvision.transforms.v2 import functional as F
@@ -28,7 +29,7 @@ class MyDataset(Dataset):
         with open(json_path, 'r') as jsonfile:
             jsondata = json.load(jsonfile)
         image_path = os.path.join(self.dataset_dir, jsondata['imagePath'])
-        img = read_image(image_path)
+        img = Image.open(image_path).convert("RGB") 
         masks, labels, boxes, area, iscrowd = self.get_instances(jsondata)
         
         # Wrap sample and targets into torchvision tv_tensors:
@@ -41,10 +42,8 @@ class MyDataset(Dataset):
         target["image_id"] = idx
         target["area"] = torch.tensor(area)
         target["iscrowd"] = torch.tensor(iscrowd)
-
         if self.transforms is not None:
             img, target = self.transforms(img, target)
-
         return img, target
 
     def get_instances(self, jsondata):
@@ -63,12 +62,17 @@ class MyDataset(Dataset):
             mask = cv2.fillPoly(mask, [points], 1)
             masks.append(mask)
             labels.append(self.class_ids[label])
-            xmin, ymin = np.min(points)
-            xmax, ymax = np.max(points)
+            xmin, ymin = np.min(points, axis=0)
+            xmax, ymax = np.max(points, axis=0)
             box = [xmin, ymin, xmax, ymax]
             boxes.append(box)
             area.append((xmax-xmin)*(ymax-ymin))
             iscrowd.append(0)
+        masks = np.array(masks)
+        labels = np.array(labels)
+        boxes = np.array(boxes)
+        area = np.array(area, dtype=np.float32)
+        iscrowd = np.array(iscrowd)
         return masks, labels, boxes, area, iscrowd
     
     

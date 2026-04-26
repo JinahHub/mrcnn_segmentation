@@ -18,8 +18,9 @@ from torchvision.models.detection.mask_rcnn import MaskRCNNPredictor
 from torch.amp import GradScaler
 from tools.engine import train_one_epoch, evaluate
 from torchvision.transforms import v2 as T
-from torchvision.io import read_image
+from PIL import Image
 from torchvision.utils import draw_bounding_boxes, draw_segmentation_masks
+from tools.utils import collate_fn
 
 def get_transform(train):
     transforms = []
@@ -27,6 +28,7 @@ def get_transform(train):
         transforms.append(T.RandomHorizontalFlip(0.5))
     transforms.append(T.ToDtype(torch.float, scale=True))
     transforms.append(T.ToPureTensor())
+    transforms.append(T.Resize((256,256)))
     return T.Compose(transforms)
 
 def main(args):
@@ -40,12 +42,12 @@ def main(args):
 
     n_classes = 2
 
-    train_dataset = MyDataset(dataset_dir=os.path.join("sample_dataset", "train"), transforms=get_transform(train=True))    # image shape: [1, height, width], mask shape: [n_classes, height, width]
+    train_dataset = MyDataset(dataset_dir=os.path.join("sample_dataset", "train"), transforms=get_transform(train=True))
     test_dataset = MyDataset(dataset_dir=os.path.join("sample_dataset", "test"), transforms=get_transform(train=False))
 
     batch_size = args.batch_size
-    train_loader = DataLoader(dataset=train_dataset, batch_size=batch_size, shuffle=True)  # image shape: [N, 1, height, width], mask shape: [N, n_classes, height, width]
-    test_loader = DataLoader(dataset=test_dataset, batch_size=batch_size, shuffle=True)
+    train_loader = DataLoader(dataset=train_dataset, batch_size=batch_size, shuffle=True, collate_fn=collate_fn)
+    test_loader = DataLoader(dataset=test_dataset, batch_size=batch_size, shuffle=True, collate_fn=collate_fn)
 
     # if platform.system() == "Darwin":   # for macOS
     #     device = torch.device("mps" if torch.backends.mps.is_available() else "cpu")
@@ -64,7 +66,7 @@ def main(args):
     hidden_layer = 256
     # and replace the mask predictor with a new one
     model.roi_heads.mask_predictor = MaskRCNNPredictor(in_features_mask, hidden_layer, n_classes+1)
-
+    model = model.to(device)
 
     params = [p for p in model.parameters() if p.requires_grad]
     optimizer = torch.optim.SGD(params, lr=0.005, momentum=0.9, weight_decay=0.0005)
@@ -97,7 +99,8 @@ def main(args):
 
         while True:
             image_path = image_paths[idx]
-            image = read_image(image_path)
+            # image = cv2.imread(image_path)
+            image = Image.open(image_path)
             eval_transform = get_transform(train=False)
 
             model.eval()
