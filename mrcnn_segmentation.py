@@ -31,14 +31,7 @@ def get_transform(train):
     transforms.append(T.Resize((256,256)))
     return T.Compose(transforms)
 
-def main(args):
-    # transform = transforms.Compose([
-    #     transforms.ToTensor(),
-    #     transforms.Resize((256, 256)), # 크기 고정 확인
-    #     transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]),
-    #     # transforms.ToPureTensor()
-    # ])
-    
+def main(args):    
 
     n_classes = 2
 
