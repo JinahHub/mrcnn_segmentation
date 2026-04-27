@@ -12,7 +12,7 @@ from glob import glob
 import json
 import numpy as np
 import cv2
-
+#tempo
 class MyDataset(Dataset):
     def __init__(self, dataset_dir, transforms):
         self.transforms = transforms
