@@ -32,7 +32,7 @@ def get_transform(train):
         transforms.append(T.ColorJitter(brightness=0.2, contrast=0.2))
 
     transforms.append(T.ToDtype(torch.float, scale=True))
-    transforms.append(T.Resize((256,256)))
+    transforms.append(T.Resize((512,512)))
     transforms.append(T.ToPureTensor())
     return T.Compose(transforms)
 
