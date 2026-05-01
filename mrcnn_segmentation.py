@@ -68,8 +68,8 @@ def main(args):
 
     params = [p for p in model.parameters() if p.requires_grad]
     # optimizer = torch.optim.SGD(params, lr=0.005, momentum=0.9, weight_decay=0.0005)
-    optimizer = torch.optim.Adam(params, lr=0.001)
-    lr_scheduler = torch.optim.lr_scheduler.StepLR(optimizer, step_size=10, gamma=0.5)
+    optimizer = torch.optim.Adam(params, lr=0.005)
+    lr_scheduler = torch.optim.lr_scheduler.StepLR(optimizer, step_size=5, gamma=0.5)
 
     num_epochs = args.num_epochs
 
@@ -97,6 +97,8 @@ def main(args):
                 torch.save(model.state_dict(), os.path.join('output', 'model_best.pth'))
 
             # update the learning rate
+            current_lr = lr_scheduler.get_last_lr()[0]
+            print("current_lr:", current_lr)
             lr_scheduler.step()
             # evaluate on the test dataset
             # evaluate(model, test_loader, device=device)
