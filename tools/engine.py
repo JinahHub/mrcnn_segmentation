@@ -9,24 +9,13 @@ from tools.coco_eval import CocoEvaluator
 from tools.coco_utils import get_coco_api_from_dataset
 from tqdm import tqdm
 
-def train_one_epoch(model, optimizer, data_loader, device, epoch, print_freq, scaler=None):
+def train_one_epoch(model, optimizer, data_loader, device, epoch, scaler=None):
     model.train()
     metric_logger = utils.MetricLogger(delimiter="  ")
     metric_logger.add_meter("lr", utils.SmoothedValue(window_size=1, fmt="{value:.6f}"))
-    header = f"Epoch: [{epoch}] in training..."
-
-    lr_scheduler = None
-    if epoch == 0:
-        warmup_factor = 1.0 / 1000
-        warmup_iters = min(1000, len(data_loader) - 1)
-
-        lr_scheduler = torch.optim.lr_scheduler.LinearLR(
-            optimizer, start_factor=warmup_factor, total_iters=warmup_iters
-        )
 
     loss_list = []
 
-    # for images, targets in metric_logger.log_every(data_loader, print_freq, header):
     for images, targets in tqdm(data_loader):
         images = list(image.to(device) for image in images)
         targets = [{k: v.to(device) if isinstance(v, torch.Tensor) else v for k, v in t.items()} for t in targets]
@@ -37,12 +26,9 @@ def train_one_epoch(model, optimizer, data_loader, device, epoch, print_freq, sc
         # reduce losses over all GPUs for logging purposes
         loss_dict_reduced = utils.reduce_dict(loss_dict)
         losses_reduced = sum(loss for loss in loss_dict_reduced.values())
-
         loss_value = losses_reduced.item()
-        # print('loss_dict', loss_dict)
-        # print('losses', losses)
-        # print('loss_value', loss_value)
-        # exit()
+
+        metric_logger.update(loss=losses_reduced, **loss_dict_reduced)
 
         if not math.isfinite(loss_value):
             print(f"Loss is {loss_value}, stopping training")
@@ -59,25 +45,17 @@ def train_one_epoch(model, optimizer, data_loader, device, epoch, print_freq, sc
         else:
             losses.backward()
             optimizer.step()
-
-        if lr_scheduler is not None:
-            lr_scheduler.step()
-
-        metric_logger.update(loss=losses_reduced, **loss_dict_reduced)
-        metric_logger.update(lr=optimizer.param_groups[0]["lr"])
     
     loss_mean = sum(loss_list)/len(loss_list)
     
     return metric_logger, loss_mean
 
-def test_one_epoch(model, data_loader, device, epoch, print_freq):
+def test_one_epoch(model, data_loader, device, epoch):
     model.train()
     metric_logger = utils.MetricLogger(delimiter="  ")
-    header = f"Epoch: [{epoch}] in test..."
     
     loss_list = []
 
-    # for images, targets in metric_logger.log_every(data_loader, print_freq, header):
     for images, targets in tqdm(data_loader):
         images = list(image.to(device) for image in images)
         targets = [{k: v.to(device) if isinstance(v, torch.Tensor) else v for k, v in t.items()} for t in targets]

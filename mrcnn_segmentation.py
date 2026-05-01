@@ -67,8 +67,9 @@ def main(args):
     model = model.to(device)
 
     params = [p for p in model.parameters() if p.requires_grad]
-    optimizer = torch.optim.SGD(params, lr=0.005, momentum=0.9, weight_decay=0.0005)
-    lr_scheduler = torch.optim.lr_scheduler.StepLR(optimizer, step_size=3, gamma=0.1)
+    # optimizer = torch.optim.SGD(params, lr=0.005, momentum=0.9, weight_decay=0.0005)
+    optimizer = torch.optim.Adam(params, lr=0.001)
+    lr_scheduler = torch.optim.lr_scheduler.StepLR(optimizer, step_size=10, gamma=0.5)
 
     num_epochs = args.num_epochs
 
@@ -82,8 +83,8 @@ def main(args):
             print(f"Epoch: {epoch} / {num_epochs-1}")
 
             # train for one epoch, printing every 10 iterations
-            train_logger, train_loss = train_one_epoch(model, optimizer, train_loader, device, epoch, print_freq=10, scaler=scaler)
-            test_logger, test_loss = test_one_epoch(model, test_loader, device, epoch, print_freq=10)
+            train_logger, train_loss = train_one_epoch(model, optimizer, train_loader, device, epoch, scaler=scaler)
+            test_logger, test_loss = test_one_epoch(model, test_loader, device, epoch)
             
             train_losses.append(train_loss)
             test_losses.append(test_loss)
