@@ -68,7 +68,7 @@ def main(args):
 
     params = [p for p in model.parameters() if p.requires_grad]
     # optimizer = torch.optim.SGD(params, lr=0.005, momentum=0.9, weight_decay=0.0005)
-    optimizer = torch.optim.Adam(params, lr=0.005)
+    optimizer = torch.optim.Adam(params, lr=0.001)
     lr_scheduler = torch.optim.lr_scheduler.StepLR(optimizer, step_size=5, gamma=0.5)
 
     num_epochs = args.num_epochs
@@ -81,8 +81,9 @@ def main(args):
     if args.command=='train':
         for epoch in range(num_epochs):
             print(f"Epoch: {epoch} / {num_epochs-1}")
+            current_lr = lr_scheduler.get_last_lr()[0]
+            print("current_lr:", current_lr)
 
-            # train for one epoch, printing every 10 iterations
             train_logger, train_loss = train_one_epoch(model, optimizer, train_loader, device, epoch, scaler=scaler)
             test_logger, test_loss = test_one_epoch(model, test_loader, device, epoch)
             
@@ -97,17 +98,13 @@ def main(args):
                 torch.save(model.state_dict(), os.path.join('output', 'model_best.pth'))
 
             # update the learning rate
-            current_lr = lr_scheduler.get_last_lr()[0]
-            print("current_lr:", current_lr)
             lr_scheduler.step()
-            # evaluate on the test dataset
+
             # evaluate(model, test_loader, device=device)
 
             save_loss_curve(train_losses, test_losses)
 
     if args.command=='test':
-        print("This is test mode.")
-
         # load model
         state_dict = torch.load(os.path.join('output', 'model_best.pth'), weights_only=True, map_location=torch.device('cpu'))
         model.load_state_dict(state_dict)
@@ -153,8 +150,8 @@ def main(args):
                 idx = len(image_paths)
 
 def save_loss_curve(train_losses, test_losses):
-    plt.plot(train_losses, label='train loss', marker='.')
-    plt.plot(test_losses, label='test loss', marker='.')
+    plt.plot(train_losses, label='Train Loss', marker='.')
+    plt.plot(test_losses, label='Test Loss', marker='.')
     plt.grid()
     plt.legend()
     plt.xlabel('Epochs')
