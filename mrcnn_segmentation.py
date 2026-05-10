@@ -135,7 +135,8 @@ def main(args):
             mask = masks[0][best_score_idx].cpu().numpy().astype(np.uint8)*255
             mask = cv2.resize(mask, (w,h))
             
-            mask_on_image = draw_mask_on_image(image, mask)
+            x_points, y_mins, y_means, y_maxs = find_output_points(mask)
+            mask_on_image = draw_mask_on_image(image, mask, x_points, y_mins, y_means, y_maxs)
 
             # cv2.imshow('mask', mask_resized)
             # cv2.waitKey()
@@ -161,13 +162,48 @@ def main(args):
             if idx > len(image_paths)-1:
                 idx = len(image_paths)
 
-def draw_mask_on_image(image, mask):
+def find_output_points(mask):
+    # create x points (10 points)
+    # find y_min points
+    # find y_max points
+    # find y_mean points
+
+    height, width = mask.shape
+    x_points = np.arange(0, width, int(width/11))
+    x_points = x_points[1:-1]
+    y_mins = []
+    y_maxs = []
+    y_means = []
+    for x in x_points:
+        y_points = np.where(mask[:,x]==255)
+        y_min = np.min(y_points)
+        y_max = np.max(y_points)
+        y_mean = int((y_min+y_max)/2)
+        y_mins.append(y_min)
+        y_maxs.append(y_max)
+        y_means.append(y_mean)
+    y_mins = np.array(y_mins)
+    y_maxs = np.array(y_maxs)
+    y_means = np.array(y_means)
+    
+    return x_points, y_mins, y_means, y_maxs
+
+def draw_mask_on_image(image, mask, x_points, y_mins, y_means, y_maxs):
     color_mask = np.zeros_like(image)   # (540, 720, 3)
     color_mask[:,:,1] = mask
     indices = np.where(mask==255)
     print(indices)
     mask_on_image = cv2.addWeighted(image, 0.5, color_mask, 0.5, 0)
     image[indices[0], indices[1]] = mask_on_image[indices[0], indices[1]]
+
+    for i, x in enumerate(x_points):
+        cv2.circle(image, (x, y_mins[i]), radius=3, color=(0,0,255), thickness=-1)
+        cv2.circle(image, (x, y_means[i]), radius=3, color=(0,255,255), thickness=-1)
+        cv2.circle(image, (x, y_maxs[i]), radius=3, color=(255,0,0), thickness=-1)
+
+    cv2.line(image, (x_points[0], y_mins[0]), (x_points[-1], y_mins[-1]), color=(0,0,255), thickness=2)
+    cv2.line(image, (x_points[0], y_means[0]), (x_points[-1], y_means[-1]), color=(0,255,255), thickness=2)
+    cv2.line(image, (x_points[0], y_maxs[0]), (x_points[-1], y_maxs[-1]), color=(255,0,0), thickness=2)
 
     return image
 
