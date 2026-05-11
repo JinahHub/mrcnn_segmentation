@@ -16,19 +16,24 @@ from torchvision.models.detection import maskrcnn_resnet50_fpn_v2, MaskRCNN_ResN
 from torchvision.models.detection.faster_rcnn import FastRCNNPredictor
 from torchvision.models.detection.mask_rcnn import MaskRCNNPredictor
 from torch.amp import GradScaler
-from tools.engine import train_one_epoch, evaluate
+from tools.engine import train_one_epoch, evaluate, test_one_epoch
 from torchvision.transforms import v2 as T
 from PIL import Image
 from torchvision.utils import draw_bounding_boxes, draw_segmentation_masks
 from tools.utils import collate_fn
+from torchvision import tv_tensors
 
 def get_transform(train):
     transforms = []
     if train:
+        transforms.append(T.RandomRotation(degrees=(-5,5)))
         transforms.append(T.RandomHorizontalFlip(0.5))
+        transforms.append(T.RandomVerticalFlip(0.5))
+        transforms.append(T.ColorJitter(brightness=0.2, contrast=0.2))
+
     transforms.append(T.ToDtype(torch.float, scale=True))
+    transforms.append(T.Resize((512,512)))
     transforms.append(T.ToPureTensor())
-    transforms.append(T.Resize((256,256)))
     return T.Compose(transforms)
 
 def main(args):    
@@ -62,27 +67,44 @@ def main(args):
     model = model.to(device)
 
     params = [p for p in model.parameters() if p.requires_grad]
-    optimizer = torch.optim.SGD(params, lr=0.005, momentum=0.9, weight_decay=0.0005)
-    lr_scheduler = torch.optim.lr_scheduler.StepLR(optimizer, step_size=3, gamma=0.1)
+    # optimizer = torch.optim.SGD(params, lr=0.005, momentum=0.9, weight_decay=0.0005)
+    optimizer = torch.optim.Adam(params, lr=0.001)
+    lr_scheduler = torch.optim.lr_scheduler.StepLR(optimizer, step_size=10, gamma=0.5)
 
     num_epochs = args.num_epochs
 
     scaler = GradScaler()
-
+    
+    train_losses = []
+    test_losses = []
+    best_test_loss = np.inf
     if args.command=='train':
         for epoch in range(num_epochs):
             print(f"Epoch: {epoch} / {num_epochs-1}")
+            current_lr = lr_scheduler.get_last_lr()[0]
+            print("current_lr:", current_lr)
 
-            # train for one epoch, printing every 10 iterations
-            train_one_epoch(model, optimizer, train_loader, device, epoch, print_freq=10, scaler=scaler)
+            train_logger, train_loss = train_one_epoch(model, optimizer, train_loader, device, scaler=scaler)
+            test_logger, test_loss = test_one_epoch(model, test_loader, device)
+            
+            train_losses.append(train_loss)
+            test_losses.append(test_loss)
+
+            print(f"Train Loss: {train_loss:.4f}\tTest Loss: {test_loss:.4f}")
+
+            if test_loss < best_test_loss:
+                best_test_loss = test_loss
+                os.makedirs('output', exist_ok=True)
+                torch.save(model.state_dict(), os.path.join('output', 'model_best.pth'))
+
             # update the learning rate
             lr_scheduler.step()
-            # evaluate on the test dataset
-            evaluate(model, test_loader, device=device)
+
+            # evaluate(model, test_loader, device=device)
+
+            save_loss_curve(train_losses, test_losses)
 
     if args.command=='test':
-        print("This is test mode.")
-
         # load model
         state_dict = torch.load(os.path.join('output', 'model_best.pth'), weights_only=True, map_location=torch.device('cpu'))
         model.load_state_dict(state_dict)
@@ -90,32 +112,44 @@ def main(args):
         image_paths = glob(os.path.join('sample_dataset', 'test', '*.bmp'))
         idx = 0
 
+        eval_transform = get_transform(train=False)
+
         while True:
             image_path = image_paths[idx]
-            # image = cv2.imread(image_path)
+            
             image = Image.open(image_path)
-            eval_transform = get_transform(train=False)
-
+            image = tv_tensors.Image(image)            
+            image = eval_transform(image)
             model.eval()
             with torch.no_grad():
-                x = eval_transform(image)
-                # convert RGBA -> RGB and move to device
-                x = x[:3, ...].to(device)
-                predictions = model([x, ])
-                pred = predictions[0]
+                predictions = model([image.to(device)])
+                # print(predictions)
+            pred = predictions[0]
+            best_score_idx = torch.argmax(pred['scores']).item()
+            # print(pred['scores'], best_score_idx)
+            # print(pred['masks'], pred['masks'].shape)
+            image = cv2.imread(image_path)
+            h, w, c = image.shape
+            
+            masks = (pred["masks"] > 0.2)
+            mask = masks[0][best_score_idx].cpu().numpy().astype(np.uint8)*255
+            mask = cv2.resize(mask, (w,h))
+            
+            x_points, y_mins, y_means, y_maxs = find_output_points(mask)
+            mask_on_image = draw_mask_on_image(image, mask, x_points, y_mins, y_means, y_maxs)
 
+            # cv2.imshow('mask', mask_resized)
+            # cv2.waitKey()
 
-            image = (255.0 * (image - image.min()) / (image.max() - image.min())).to(torch.uint8)
-            image = image[:3, ...]
-            pred_labels = [f"{label}: {score:.3f}" for label, score in zip(pred["labels"], pred["scores"])]
-            pred_boxes = pred["boxes"].long()
-            output_image = draw_bounding_boxes(image, pred_boxes, pred_labels, colors="red")
+            # pred_labels = [f"{label}: {score:.3f}" for label, score in zip(pred["labels"], pred["scores"])]
+            # pred_boxes = pred["boxes"].long()
 
-            masks = (pred["masks"] > 0.7).squeeze(1)
-            output_image = draw_segmentation_masks(output_image, masks, alpha=0.5, colors="green")
-            output_image = output_image.permute(1, 2, 0).numpy()
+            # output_image = draw_bounding_boxes(image, pred_boxes, pred_labels, colors="red")
+            # masks = (pred["masks"] > 0.2).squeeze(1)
+            # output_image = draw_segmentation_masks(output_image, masks, alpha=0.5, colors="green")
+            # output_image = output_image.permute(1, 2, 0).numpy()    #[c, h, w] --> [h, w, c]
 
-            cv2.imshow('output_image', output_image)
+            cv2.imshow('output_image', mask_on_image)
             key = cv2.waitKey()
             if key==ord('q'):
                 break
@@ -128,7 +162,61 @@ def main(args):
             if idx > len(image_paths)-1:
                 idx = len(image_paths)
 
+def find_output_points(mask):
+    # create x points (10 points)
+    # find y_min points
+    # find y_max points
+    # find y_mean points
 
+    height, width = mask.shape
+    x_points = np.arange(0, width, int(width/11))
+    x_points = x_points[1:-1]
+    y_mins = []
+    y_maxs = []
+    y_means = []
+    for x in x_points:
+        y_points = np.where(mask[:,x]==255)
+        y_min = np.min(y_points)
+        y_max = np.max(y_points)
+        y_mean = int((y_min+y_max)/2)
+        y_mins.append(y_min)
+        y_maxs.append(y_max)
+        y_means.append(y_mean)
+    y_mins = np.array(y_mins)
+    y_maxs = np.array(y_maxs)
+    y_means = np.array(y_means)
+    
+    return x_points, y_mins, y_means, y_maxs
+
+def draw_mask_on_image(image, mask, x_points, y_mins, y_means, y_maxs):
+    color_mask = np.zeros_like(image)   # (540, 720, 3)
+    color_mask[:,:,1] = mask
+    indices = np.where(mask==255)
+    print(indices)
+    mask_on_image = cv2.addWeighted(image, 0.5, color_mask, 0.5, 0)
+    image[indices[0], indices[1]] = mask_on_image[indices[0], indices[1]]
+
+    for i, x in enumerate(x_points):
+        cv2.circle(image, (x, y_mins[i]), radius=3, color=(0,0,255), thickness=-1)
+        cv2.circle(image, (x, y_means[i]), radius=3, color=(0,255,255), thickness=-1)
+        cv2.circle(image, (x, y_maxs[i]), radius=3, color=(255,0,0), thickness=-1)
+
+    cv2.line(image, (x_points[0], y_mins[0]), (x_points[-1], y_mins[-1]), color=(0,0,255), thickness=2)
+    cv2.line(image, (x_points[0], y_means[0]), (x_points[-1], y_means[-1]), color=(0,255,255), thickness=2)
+    cv2.line(image, (x_points[0], y_maxs[0]), (x_points[-1], y_maxs[-1]), color=(255,0,0), thickness=2)
+
+    return image
+
+def save_loss_curve(train_losses, test_losses):
+    plt.plot(train_losses, label='Train Loss', marker='.')
+    plt.plot(test_losses, label='Test Loss', marker='.')
+    plt.grid()
+    plt.legend()
+    plt.xlabel('Epochs')
+    plt.ylabel('Loss')
+    plt.title("Loss Curve")
+    plt.savefig("loss_curve.png")
+    plt.close()
 
 
 
@@ -137,7 +225,7 @@ def argparse_args():
     desc = "Pytorch implementation of 'Mask R-CNN Image Segmentation'"
     parser = argparse.ArgumentParser(description=desc)
     parser.add_argument('command', help="'train' or 'test' or 'labeling'")
-    parser.add_argument('--num_epochs', default=1000, type=int, help="The number of epochs to run")
+    parser.add_argument('--num_epochs', default=300, type=int, help="The number of epochs to run")
     parser.add_argument('--batch_size', default=4, type=int, help="The number of mini-batchs for each epoch")
     return parser.parse_args()
 
